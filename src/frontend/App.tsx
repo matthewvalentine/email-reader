@@ -7,7 +7,7 @@ interface AppProps {
 }
 
 interface AppState {
-    time: string;
+    time: string | null;
 }
 
 export class App extends React.Component<AppProps, AppState> {
@@ -18,7 +18,7 @@ export class App extends React.Component<AppProps, AppState> {
             time: null
         }
     }
-    
+
     componentDidMount() {
         this.getTime();
         setInterval(this.getTime, 2000);

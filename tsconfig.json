@@ -5,18 +5,10 @@
       "module": "ES6",
       "moduleResolution": "node",
       "sourceMap": true,
-      "noImplicitAny": true,
-      "noImplicitReturns": true,
-      "noEmitOnError": true,
-      "noUnusedLocals": true,
-      "noUnusedParameters": false,
-      "suppressImplicitAnyIndexErrors": true,
+      "strict": true,
       "removeComments": false,
       "jsx": "react",
       "outDir": "dist",
       "allowSyntheticDefaultImports": true
-  },
-  "exclude": [
-      "node_modules"
-  ]
+  }
 }
