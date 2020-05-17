@@ -1,39 +1,45 @@
-import fetch from 'node-fetch';
 import * as React from 'react';
 import { render } from 'react-dom';
 
-interface AppProps {
-    name: string;
-}
-
-interface AppState {
-    time: string | null;
-}
+type Event =
+    | {type: 'found_messages', messageCount: number}
+    | {type: 'processed_messages', wordCount: [string, number][]};
 
 export function App() {
-    const [messageCount, setMessageCount] = React.useState<number | null>(null);
+    const [totalMessageCount, setTotalMessageCount] = React.useState<number | null>(null);
+    const [processedMessageCount, setProcessedMessageCount] = React.useState(0);
+    const [recentWords, setRecentWords] = React.useState<string[]>([]);
 
     React.useEffect(() => {
-        const ctrl = new AbortController();
-        fetch(
-            '/api/email_count',
-            {method: 'POST', signal: ctrl.signal as any},  // TODO: Browser and node types are mixed up
-        ).then(async response => {
-            if (!response.ok) {
-                return;
+        const events = new EventSource('/api/connect');
+        events.addEventListener('message', rawEvent => {
+            const event: Event = JSON.parse(rawEvent.data);
+            switch (event.type) {
+                case 'found_messages':
+                    setTotalMessageCount(c => (c ?? 0) + event.messageCount);
+                    break;
+                case 'processed_messages':
+                    setProcessedMessageCount(c => c + 1);
+                    event.wordCount.sort(
+                        // negative = reverse
+                        ([, lhsCount], [, rhsCount]) => -(lhsCount - rhsCount),
+                    );
+                    setRecentWords(event.wordCount.slice(0, 10).map(([w]) => w));
+                    break;
             }
-            const {messageCount} = await response.json();
-            if (ctrl.signal.aborted) {
-                return;
-            }
-            setMessageCount(messageCount);
         });
-        return () => ctrl.abort();
+        return () => events.close();
     }, []);
 
-    return <div>Total messages: {messageCount ?? 'loading...'}</div>;
+    return <div>
+        <div>Total messages: {
+            totalMessageCount === null
+            ? 'loading...'
+            : `${processedMessageCount} / ${totalMessageCount}`
+        }</div>
+        {recentWords.map(w => <div>{w}</div>)}
+    </div>;
 }
-
 
 export function start() {
     const rootElem = document.getElementById('main');

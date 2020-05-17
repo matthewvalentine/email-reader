@@ -1,6 +1,9 @@
 import {readFileSync} from 'fs';
 import {google} from 'googleapis';
 
+// TODO: Figure out how to import this type from googleapis.
+export type Credentials = any;
+
 interface OauthSecret {
     web: {
         'client_id': string;
@@ -23,7 +26,7 @@ export class OauthProvider {
         }
     }
 
-    newClient(credentials?: any /* TODO: Figure out how to import this type */) {
+    newClient(credentials?: Credentials) {
         const client = new google.auth.OAuth2(
             this.secret.web.client_id,
             this.secret.web.client_secret,

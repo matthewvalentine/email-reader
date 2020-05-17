@@ -1,9 +1,10 @@
 import * as express from 'express';
 import session from "express-session";
-import {google} from "googleapis";
 import * as path from 'path';
-import {performance} from 'perf_hooks';
+import {processAllEmails} from "./email";
 import {OauthProvider} from "./oauth";
+import {AbortController} from 'abort-controller';
+import {consume} from "./streams";
 
 const oauth = new OauthProvider(
     './secret/oauth_secret.json',
@@ -17,44 +18,43 @@ app.use(session({
     // TODO: There are warnings about some parameters for which being optional has been deprecated.
 }));
 
-// Simple endpoint that returns the current time
-app.get('/api/time', (req, res) => {
-    res.send(new Date().toISOString());
-});
-
-app.post('/api/email_count', async (req, res, next) => {
+app.get('/api/connect', async (req, res, next) => {
     try {
-        let closed = false;
-        req.on('close', () => { closed = true; });
+        const abort = new AbortController();
+        req.on('close', () => { abort.abort(); });
 
-        const start = performance.now();
-        const gmail = google.gmail({version: 'v1', auth: oauth.newClient(req.session?.credentials)});
+        // Designate this as a Server Sent Events stream.
+        res.writeHead(200, {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+        });
 
-        let messageCount = 0;
-        let pageCount = 0;
-        let nextPage: string | undefined;
-        while (true) {
-            if (closed) {
-                throw new Error('Request canceled');
-            }
-            
-            const response = await gmail.users.messages.list({
-                userId: 'me',
-                includeSpamTrash: true,
-                pageToken: nextPage,
-            });
+        consume(
+            processAllEmails(oauth, req.session!.credentials, abort.signal),
+            async (event) => {
+                switch (event.type) {
+                    case 'found_messages':
+                        sendEvent(event);
+                        break;
+                    case 'processed_messages':
+                        sendEvent({
+                            type: event.type,
+                            wordCount: Array.from(event.wordCount.entries()),
+                        });
+                        break;
+                    default:
+                        // Type-assert that all possibilities have been covered.
+                        const _: never = event;
+                        throw new Error(`Unexpected event ${JSON.stringify(event)}`);
+                }
+            },
+            {cancel: abort.signal},
+        );
 
-            pageCount++;
-            messageCount += response.data.messages?.length ?? 0;
-            console.log(pageCount, messageCount, (performance.now() - start)/1000);
-            nextPage = response.data.nextPageToken ?? undefined;
-            if (!nextPage) {
-                break;
-            }
+        function sendEvent(data: object) {
+            res.write(`data: ${JSON.stringify(data)}\n\n`);
         }
-        const stop = performance.now();
-        console.log(`Listed ${messageCount} message IDs in ${pageCount} pages and ${(stop - start)/1000} seconds.`);
-        res.json({messageCount});
     } catch (err) {
         next(err);
     }
