@@ -1,7 +1,9 @@
 import * as express from 'express';
-import * as path from 'path';
-import {OauthProvider} from "./oauth";
 import session from "express-session";
+import {google} from "googleapis";
+import * as path from 'path';
+import {performance} from 'perf_hooks';
+import {OauthProvider} from "./oauth";
 
 const oauth = new OauthProvider(
     './secret/oauth_secret.json',
@@ -18,6 +20,44 @@ app.use(session({
 // Simple endpoint that returns the current time
 app.get('/api/time', (req, res) => {
     res.send(new Date().toISOString());
+});
+
+app.post('/api/email_count', async (req, res, next) => {
+    try {
+        let closed = false;
+        req.on('close', () => { closed = true; });
+
+        const start = performance.now();
+        const gmail = google.gmail({version: 'v1', auth: oauth.newClient(req.session?.credentials)});
+
+        let messageCount = 0;
+        let pageCount = 0;
+        let nextPage: string | undefined;
+        while (true) {
+            if (closed) {
+                throw new Error('Request canceled');
+            }
+            
+            const response = await gmail.users.messages.list({
+                userId: 'me',
+                includeSpamTrash: true,
+                pageToken: nextPage,
+            });
+
+            pageCount++;
+            messageCount += response.data.messages?.length ?? 0;
+            console.log(pageCount, messageCount, (performance.now() - start)/1000);
+            nextPage = response.data.nextPageToken ?? undefined;
+            if (!nextPage) {
+                break;
+            }
+        }
+        const stop = performance.now();
+        console.log(`Listed ${messageCount} message IDs in ${pageCount} pages and ${(stop - start)/1000} seconds.`);
+        res.json({messageCount});
+    } catch (err) {
+        next(err);
+    }
 });
 
 app.get('/auth/google/callback', async (req, res, next) => {

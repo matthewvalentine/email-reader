@@ -10,36 +10,32 @@ interface AppState {
     time: string | null;
 }
 
-export class App extends React.Component<AppProps, AppState> {
+export function App() {
+    const [messageCount, setMessageCount] = React.useState<number | null>(null);
 
-    constructor(props: AppProps) {
-        super(props);
-        this.state = {
-            time: null
-        }
-    }
+    React.useEffect(() => {
+        const ctrl = new AbortController();
+        fetch(
+            '/api/email_count',
+            {method: 'POST', signal: ctrl.signal as any},  // TODO: Browser and node types are mixed up
+        ).then(async response => {
+            if (!response.ok) {
+                return;
+            }
+            const {messageCount} = await response.json();
+            if (ctrl.signal.aborted) {
+                return;
+            }
+            setMessageCount(messageCount);
+        });
+        return () => ctrl.abort();
+    }, []);
 
-    componentDidMount() {
-        this.getTime();
-        setInterval(this.getTime, 2000);
-    }
-
-    render() {
-        const {name} = this.props;
-        const {time} = this.state;
-        return <><h1>{name}</h1><div>{time}</div></>;
-    }
-
-    private getTime = async () => {
-        const response = await fetch('/api/time', { method: 'GET' });
-        if (response.ok) {
-            this.setState({time: await response.text()});
-        }
-    }
-
+    return <div>Total messages: {messageCount ?? 'loading...'}</div>;
 }
+
 
 export function start() {
     const rootElem = document.getElementById('main');
-    render(<App name="Hello World" />, rootElem);
+    render(<App />, rootElem);
 }
