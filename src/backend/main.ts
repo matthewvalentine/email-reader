@@ -1,9 +1,9 @@
+import {AbortController} from 'abort-controller';
 import * as express from 'express';
 import session from "express-session";
 import * as path from 'path';
 import {processAllEmails} from "./email";
 import {OauthProvider} from "./oauth";
-import {AbortController} from 'abort-controller';
 import {consume} from "./streams";
 
 const oauth = new OauthProvider(
