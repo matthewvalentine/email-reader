@@ -1,16 +1,21 @@
-import fetch from 'node-fetch';
+import {parse, NodeType, HTMLElement} from 'node-html-parser';
 import {URL} from 'url';
+import type {Response} from 'node-fetch'
+
+// Because this file is also used in a Worker and something is broken about
+// how those are built.
+const fetch = __non_webpack_require__('node-fetch');
 
 // TODO: Either lots and lots of cataloguing, or cleverer tricks.
 // For example, the hostname along with something that looks like a big base64-UID
 // might be enough to determine that it is likely to be a link to content.
 
-// TODO: Somewhere, follow link shorteners.
+// TODO: Follow link shorteners like tinyurl.
 
 const b64id = /^[0-9a-zA-Z_\-]{8,}$/;
 const googleDriveHost = /^(drive|docs)\.google\.com/i;
 const googleContentHost = /^[\w.]+\.googleusercontent\.com/i;
-const googleDriveFileLink = /^\/\w+\/d\/[0-9a-zA-Z_\-]{8,}/;
+const googleDriveFileLink = /^\/\w+\/d\/([0-9a-zA-Z_\-]{8,})/;
 const googleDriveActionLink = /^\/\w+/;
 
 export function isProbablyGoogleDriveLink(url: URL): boolean {
@@ -30,12 +35,18 @@ export function isProbablyGoogleDriveLink(url: URL): boolean {
     return false;
 }
 
-export async function isGoogleDriveLinkPublic(url: URL): Promise<boolean> {
+export interface GoogleDriveInfo {
+    isPublic: boolean;
+    title?: string;
+}
+
+export async function fetchGoogleDriveInfo(url: URL): Promise<GoogleDriveInfo> {
+    // TODO: Consider using header-only requests
     const response = await fetch(url.href);
     if (!response.ok) {
         // TODO: Distinguish temporary errors from permanent errors,
         // except that malformed URLs could even produce permanent "temporary" errors.
-        return false;
+        return {isPublic: false};
     }
 
     let redirectedURL: URL;
@@ -43,10 +54,41 @@ export async function isGoogleDriveLinkPublic(url: URL): Promise<boolean> {
         redirectedURL = new URL(response.url);
     } catch(err) {
         console.error(err);
-        return false;
+        return {isPublic: false};
+    }
+
+    if (googleDriveHost.test(redirectedURL.hostname)) {
+        return {isPublic: true, title: await parseTitle(response)};
+    }
+
+    if (googleContentHost.test(redirectedURL.hostname)) {
+        const docId = url.searchParams.get('id');
+        if (!docId) {
+            return {isPublic: true};
+        }
+
+        const documentResponse = await fetch(`https://drive.google.com/open?id=${docId}`);
+        if (!documentResponse.ok) {
+            return {isPublic: true};
+        }
+        return {isPublic: true, title: await parseTitle(documentResponse)};
     }
 
     // TODO: Log unexpected domains gotten this way.
     // (Actual redirects to sign in should end up on accounts.google.com and not elsewhere.)
-    return googleDriveHost.test(redirectedURL.hostname) || googleContentHost.test(redirectedURL.hostname);
+    return {isPublic: false};
+}
+
+async function parseTitle(response: Response): Promise<string | undefined> {
+    // TODO: I'm not happy with this since it reads the whole body
+    // but for some reason the more capable packages (to successfully parse just the first bit of the html)
+    // seem to all run into module resolution errors.
+    if (!response.ok) {
+        return undefined;
+    }
+    const parsed = parse(await response.text()) as HTMLElement & {valid: boolean};
+    if (!parsed.valid || parsed.nodeType != NodeType.ELEMENT_NODE) {
+        return undefined;
+    }
+    return parsed.querySelector('title')?.innerHTML || undefined;
 }

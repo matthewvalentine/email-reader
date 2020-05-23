@@ -25,13 +25,34 @@ export interface ConsumeOptions {
     cancel?: AbortSignal;
 }
 
-// Pull and process values from an input stream.
-// TODO: Retry, backoff, dead-letter.
-// TODO: Batching.
+export type ConsumeOptionsWithInitialization<W> = ConsumeOptions & {
+    initializeWorker: () => Promise<InitializedWorker<W>>;
+}
+
+export interface InitializedWorker<W> {
+    worker: W;
+    cleanup?: () => Promise<void> | void;
+}
+
 export function consume<T>(
     input: ReadStream<T>,
     process: (message: T) => Promise<void>,
-    options: ConsumeOptions = {},
+    options?: ConsumeOptions,
+): void;
+
+export function consume<T, W>(
+    input: ReadStream<T>,
+    process: (message: T, worker: W) => Promise<void>,
+    options: ConsumeOptionsWithInitialization<W>,
+): void;
+
+// Pull and process values from an input stream.
+// TODO: Retry, backoff, dead-letter.
+// TODO: Batching.
+export function consume<T, W>(
+    input: ReadStream<T>,
+    process: (message: T, worker?: W) => Promise<void>,
+    options: Partial<ConsumeOptionsWithInitialization<W>> = {},
 ) {
     const state = new Monitored({active: 0});
     for (let i = 0; i < (options.workers ?? 1); i++) {
@@ -39,8 +60,13 @@ export function consume<T>(
     }
 
     async function runWorker() {
-        while (!options.cancel?.aborted) {
-            await process(await input.take());
+        const {worker, cleanup} = await options.initializeWorker?.() ?? {};
+        try {
+            while (!options.cancel?.aborted) {
+                await process(await input.take(), worker);
+            }
+        } finally {
+            await cleanup?.();
         }
     }
 }

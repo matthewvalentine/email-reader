@@ -2,6 +2,7 @@ const webpack = require('webpack');
 const path = require('path');
 const nodeExternals = require('webpack-node-externals');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
+const ThreadsPlugin = require('threads-plugin');
 
 const PROJECTS = (process.env.PROJECTS || '').split(',');
 const IS_WATCH = !!process.env.WATCH;
@@ -31,14 +32,6 @@ const moduleConfig = (tscOptions = {}) => ({
         }
     ]
 });
-
-/**
- * Lets server side webpack bundles use sourcemaps
- * See: https://decembersoft.com/posts/how-to-fix-your-server-side-typescript-call-stack-with-webpack-bannerplugin/
- */
-const sourceMapBannerPlugin = new webpack.BannerPlugin({ banner: 'require("source-map-support").install();', raw: true, entryOnly: false });
-
-const htmlPlugin = new HtmlWebpackPlugin({template: './src/frontend/index.html'});
 
 const frontendBuild = (name, entryFile, outputFile) => ({
     name: name,
@@ -70,7 +63,9 @@ const frontendBuild = (name, entryFile, outputFile) => ({
         "react": "React",
         "react-dom": "ReactDOM"
     },
-    plugins: [htmlPlugin]
+    plugins: [
+        new HtmlWebpackPlugin({template: './src/frontend/index.html'}),
+    ]
 });
 
 const backendBuild = (name, entryFile, outputFile = 'server.js') => {
@@ -94,16 +89,24 @@ const backendBuild = (name, entryFile, outputFile = 'server.js') => {
         resolve: resolveConfig,
         // ignores node_modules
         externals: [nodeExternals()],
-        plugins: [sourceMapBannerPlugin]
+        plugins: [
+            // Lets server side webpack bundles use sourcemaps
+            // See: https://decembersoft.com/posts/how-to-fix-your-server-side-typescript-call-stack-with-webpack-bannerplugin/
+            new webpack.BannerPlugin({ banner: 'require("source-map-support").install();', raw: true, entryOnly: false }),
+
+            // Bundles WorkerThread code into separate file bundles by detecting `new Worker("path")` calls.
+            // See: https://threads.js.org/getting-started
+            new ThreadsPlugin(),
+        ]
     };
 }
 
 const availableProjects = {
 
     frontend: frontendBuild('frontend', './src/frontend/main.ts', 'bundle.js'),
-    
+
     backend: backendBuild('backend', './src/backend/main.ts', 'server.js'),
-    
+
     test: backendBuild('test', './src/test.ts', 'test.js'),
 
 };

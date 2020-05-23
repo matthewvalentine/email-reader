@@ -1,12 +1,13 @@
 import {AbortController} from 'abort-controller';
-import {gmail_v1, google} from "googleapis";
-import * as linkify from 'linkifyjs';
-import {AbortSignal} from "node-fetch/externals";
+import {gmail_v1, google} from 'googleapis';
+import {AbortSignal} from 'node-fetch/externals';
+import * as os from 'os';
+import {spawn, Worker} from 'threads/dist';
 import {URL} from 'url';
-import {decode} from "urlsafe-base64";
-import {Credentials, OauthProvider} from "./oauth";
-import {isGoogleDriveLinkPublic, isProbablyGoogleDriveLink} from "./public_links";
-import {consume, MemoryQueue, ReadStream} from "./streams";
+import {Credentials, OauthProvider} from './oauth';
+import type {ParseResult, ParseWorker} from './parse.worker';
+import {fetchGoogleDriveInfo, isProbablyGoogleDriveLink} from './public_links';
+import {consume, MemoryQueue, ReadStream} from './streams';
 
 export type EmailResult =
     | { type: 'found_messages', messageCount: number}
@@ -26,6 +27,7 @@ export function processAllEmails(oauth: OauthProvider, credentials: Credentials,
     // TODO: Parse is currently following possibly-public-links,
     // split that into a separate step with separate workers.
     const toParse = new MemoryQueue<gmail_v1.Schema$Message>();
+    const suspicious = new MemoryQueue<ParseResult>();
     const results = new MemoryQueue<EmailResult>();
 
     // Set up the pipeline.
@@ -47,58 +49,50 @@ export function processAllEmails(oauth: OauthProvider, credentials: Credentials,
         // TODO: This is a ton of workers. Use Google's batch API instead.
         // However, it doesn't seem supported by the client, so it'd have to be raw HTTP.
         // In comparison, typing a big number is just so easy...
-        workers: 35,
+        workers: 30,
         cancel,
     });
 
-    // TODO: Use WorkerThreads as parsing is CPU bound.
-    consume(toParse, async (message) => {
-        const wordCount = new Map<string, number>();
-        for (const body of readEmailPayload(message.payload ?? {})) {
-            for (const {value, href} of linkify.find(body)) {
-                let url: URL;
-                try {
-                    url = new URL(href);
-                } catch (err) {
-                    // TODO: There are a lot of these false positives, mostly the same format.
-                    // Ignore those for logging.
-                    // TODO: re-enable: console.error(value, href, err);
-                    continue;
-                }
+    consume(
+        toParse,
+        async (message: gmail_v1.Schema$Message, worker: ParseWorker) => {
+            const parsed = await worker(message);
+            if (parsed.suspiciousLinks.length === 0) {
+                results.publish({type: 'processed_messages', wordCount: new Map<string, number>()});
+            } else {
+                suspicious.publish(parsed);
+            }
+        },
+        {
+            cancel,
+            initializeWorker: async () => {
+                const worker = new Worker('./parse.worker');
+                return {
+                    worker: await spawn<ParseWorker>(worker),
+                    cleanup: () => worker.terminate(),
+                };
+            },
+            workers: os.cpus().length,
+        },
+    );
 
-                if (isProbablyGoogleDriveLink(url) && await isGoogleDriveLinkPublic(url)) {
-                    wordCount.set(value, 1 + (wordCount.get(value) ?? 0));
-                }
+    consume(suspicious, async ({suspiciousLinks}) => {
+        const wordCount = new Map<string, number>();
+        for (const {link, originalText} of suspiciousLinks) {
+            const url = new URL(link);
+            const {isPublic, title} = await fetchGoogleDriveInfo(url);
+            if (isPublic) {
+                wordCount.set(title || originalText, 1 + (wordCount.get(title || originalText) ?? 0));
             }
         }
         results.publish({type: 'processed_messages', wordCount});
-    }, {cancel});
+    }, {
+        cancel,
+        workers: 5,
+    });
 
     // After setting up the pipeline, kick it off with our initial message.
     toList.publish({});
 
     return results;
-}
-
-function* readEmailPayload(payload: gmail_v1.Schema$MessagePart): Iterable<string> {
-    if (payload.parts) {
-        for (const part of payload.parts) {
-            // TODO: This should be iterative, because I can't really trust the input to
-            // not be incredibly deep. But in practice it seems not to be, so I'll
-            // leave it the simple way here for now.
-            yield* readEmailPayload(part);
-        }
-        return;
-    }
-
-    const data = payload.body?.data;
-    if (!data) {
-        return;
-    }
-
-    // TODO: Probably some kind of latent problem here, like text encoding,
-    // or just plain corrupted emails. Right now I'm not even catching errors,
-    // every email in my personal inbox seems to get parsed correctly.
-    // Maybe Google is being super nice and converting/fixing stuff as necessary.
-    yield decode(data).toString('utf8');
 }
