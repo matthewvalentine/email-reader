@@ -1,8 +1,10 @@
 import {readFileSync} from 'fs';
 import {google} from 'googleapis';
 
-// TODO: Figure out how to import this type from googleapis.
-export type Credentials = any;
+// I can't for the life of me import these types directly from googleapis, even though they appear exported.
+const dummyOauthConstructor = () => new google.auth.OAuth2();
+export type OauthClient = ReturnType<typeof dummyOauthConstructor>;
+export type Credentials = Parameters<OauthClient['setCredentials']>[0];
 
 interface OauthSecret {
     web: {
@@ -26,7 +28,7 @@ export class OauthProvider {
         }
     }
 
-    newClient(credentials?: Credentials) {
+    newClient(credentials?: Credentials): OauthClient {
         const client = new google.auth.OAuth2(
             this.secret.web.client_id,
             this.secret.web.client_secret,

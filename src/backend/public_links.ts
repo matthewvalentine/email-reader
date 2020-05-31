@@ -1,6 +1,7 @@
-import {parse, NodeType, HTMLElement} from 'node-html-parser';
-import {URL} from 'url';
 import type {Response} from 'node-fetch'
+import {HTMLElement, NodeType, parse} from 'node-html-parser';
+import {URL} from 'url';
+import {decode} from 'he';
 
 // Because this file is also used in a Worker and something is broken about
 // how those are built.
@@ -80,15 +81,28 @@ export async function fetchGoogleDriveInfo(url: URL): Promise<GoogleDriveInfo> {
 }
 
 async function parseTitle(response: Response): Promise<string | undefined> {
-    // TODO: I'm not happy with this since it reads the whole body
-    // but for some reason the more capable packages (to successfully parse just the first bit of the html)
-    // seem to all run into module resolution errors.
-    if (!response.ok) {
+    try {
+        // TODO: I'm not happy with this since it reads the whole body
+        // but for some reason the more capable packages (to successfully parse just the first bit of the html)
+        // seem to all run into module resolution errors.
+        if (!response.ok) {
+            // TODO: Should distinguish temporary and permanent failures for purpose of retries.
+            return undefined;
+        }
+
+        const parsed = parse(await response.text()) as HTMLElement & {valid: boolean};
+        if (!parsed.valid || parsed.nodeType != NodeType.ELEMENT_NODE) {
+            return undefined;
+        }
+
+        const title = parsed.querySelector('title')?.innerHTML;
+        if (!title) {
+            return undefined;
+        }
+
+        return decode(title);
+    } catch(err) {
+        console.error(err);
         return undefined;
     }
-    const parsed = parse(await response.text()) as HTMLElement & {valid: boolean};
-    if (!parsed.valid || parsed.nodeType != NodeType.ELEMENT_NODE) {
-        return undefined;
-    }
-    return parsed.querySelector('title')?.innerHTML || undefined;
 }

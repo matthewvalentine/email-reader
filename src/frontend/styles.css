@@ -1,0 +1,38 @@
+.scaled-image {
+    width: 100%;
+    height: auto;
+}
+
+.hover-shadow:hover {
+    box-shadow: 0 .5rem 1rem rgba(0,0,0,.15);
+}
+
+.border-left-danger {
+    border-left: 0.5rem solid var(--danger);
+}
+
+.border-left-warning {
+    border-left: 0.5rem solid var(--warning);
+}
+
+.chart-holder {
+    width: 100%;
+    height: 20rem;
+    max-height: 100%;
+    position: relative;
+}
+
+.relative {
+    position: relative;
+}
+
+.absolute-centered-container {
+    position: absolute;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    right: 0;
+}

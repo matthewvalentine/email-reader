@@ -29,7 +29,22 @@ const moduleConfig = (tscOptions = {}) => ({
                     }
                 }
             ]
-        }
+        },
+        {
+            test: /\.(jpg|png)$/,
+            include: includeDirs,
+            use: [
+                {loader: 'url-loader'},
+            ]
+        },
+        {
+            test:/\.css$/,
+            include: includeDirs,
+            use: [
+                {loader: 'style-loader'},
+                {loader: 'css-loader'},
+            ]
+        },
     ]
 });
 
